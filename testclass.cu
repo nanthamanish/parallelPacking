@@ -1,3 +1,8 @@
+/*
+
+file to test CUDA Kernel
+
+*/
 #include <fstream>
 #include <stdio.h>
 #include <set>
@@ -75,67 +80,6 @@ __global__ void make_check_les(int *eq, float *G, float val, int b, int xl, int 
     }
 }
 
-struct Location
-{
-    int x, y, z;
-    Location()
-    {
-        x = -1, y = -1, z = -1;
-    }
-
-    Location(Location &L)
-    {
-        x = L.x, y = L.y, z = L.z;
-    }
-};
-
-class Item
-{
-    int id, dst, wt;
-    int l, b, h;
-    int l1, b1, h1;
-
-    vector<int> orientation, stackload;
-
-    int max_dim, v_ld_lim;
-    bool packed;
-    Location pos;
-
-    Item(int, int, int, int, int, int, vector<int>, vector<int>);
-    Item(Item &I);
-};
-
-Item::Item(int Id, int Dst, int Wt, int L, int B, int H, vector<int> otn, vector<int> sld)
-{
-    id = Id, dst = Dst, wt = wt;
-    l = L, b = B, h = H;
-    l1 = l, b1 = b, h1 = h;
-
-    stackload = sld;
-    orientation = otn;
-
-    max_dim = max({l, b, h});
-    v_ld_lim = stackload[2];
-
-    packed = false;
-    pos = Location();
-}
-
-Item::Item(Item &I)
-{
-    id = I.id, dst = I.dst, wt = I.wt;
-    l = I.l, b = I.b, h = I.h;
-    l1 = I.l1, b1 = I.b1, h1 = I.h1;
-
-    stackload = I.stackload;
-    orientation = I.orientation;
-
-    max_dim = I.max_dim;
-    v_ld_lim = I.v_ld_lim;
-    packed = I.packed;
-    pos = Location(I.pos);
-}
-
 class Container
 {
 private:
@@ -145,8 +89,8 @@ private:
 public:
     int *h_grid;
     float *ld_lim;
-    std::set<std::pair<int, int>> pos;
-    std::vector<Item> packedI;
+    // std::set<std::pair<int, int>> pos;
+    // std::vector<Item> packedI;
 
     Container(int L, int B);
     Container(Container &C);
