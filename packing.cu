@@ -4,10 +4,13 @@ Packing File
 
 */
 
-#include <fstream>
 #include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <algorithm>
 #include <set>
 #include <vector>
+
 #include <thrust/reduce.h>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
@@ -95,30 +98,48 @@ struct Location
     }
 };
 
-class Item
+struct Item
 {
-    int id, dst, wt;
+    int id, dst;
+    float wt;
     int l, b, h;
+    long vol;
     int l1, b1, h1;
 
-    vector<int> orientation, stackload;
+    vector<int> orientation;
+    vector<float> stackload;
 
     int max_dim, v_ld_lim;
     bool packed;
     Location pos;
 
-    Item(int, int, int, int, int, int, vector<int>, vector<int>);
+    Item(int, int, float, int, int, int, vector<int>, vector<float>);
     Item(Item &I);
+
+    bool operator < (const Item& I) const
+    {
+        if(dst != I.dst) {
+            return dst < I.dst;
+        }
+        float m1 = 0, m2 = 0;
+        for(int i = 0; i < 3; i++) {
+            m1 = max(m1, (float)orientation[i] * stackload[i]);
+            m2 = max(m2, (float)I.orientation[i] * I.stackload[i]);
+        }
+        return m1 < m2;
+    }
 };
 
-Item::Item(int Id, int Dst, int Wt, int L, int B, int H, vector<int> otn, vector<int> sld)
+Item::Item(int Id, int Dst, float Wt, int L, int B, int H, vector<int> ornt, vector<float> stld)
 {
     id = Id, dst = Dst, wt = wt;
     l = L, b = B, h = H;
     l1 = l, b1 = b, h1 = h;
 
-    stackload = sld;
-    orientation = otn;
+    vol = l * 1L * b * 1L * h;
+
+    stackload = stld;
+    orientation = ornt;
 
     max_dim = max({l, b, h});
     v_ld_lim = stackload[2];
@@ -132,6 +153,8 @@ Item::Item(Item &I)
     id = I.id, dst = I.dst, wt = I.wt;
     l = I.l, b = I.b, h = I.h;
     l1 = I.l1, b1 = I.b1, h1 = I.h1;
+    
+    vol = l * 1L * b * 1L * h;
 
     stackload = I.stackload;
     orientation = I.orientation;
@@ -142,27 +165,34 @@ Item::Item(Item &I)
     pos = Location(I.pos);
 }
 
-class Container
+struct Container
 {
-private:
     int L;
     int B;
+    int H;
 
-public:
+    long vol;
+
     int *h_grid;
     float *ld_lim;
+
     std::set<std::pair<int, int>> pos;
     std::vector<Item> packedI;
 
-    Container(int L, int B);
+    Container(int, int, int);
     Container(Container &C);
     ~Container();
 };
 
-Container::Container(int l, int b)
+Container::Container(int l, int b, int h)
 {
     L = l;
     B = b;
+    H = h;
+
+    vol = L * 1l * B * 1l * H;    
+
+    pos.insert({0, 0});
 
     cudaMalloc((void **)&h_grid, L * B * sizeof(int));
     cudaMemcpy(h_grid, cpu_h_grid, L * B * sizeof(int), cudaMemcpyHostToDevice);
@@ -175,6 +205,17 @@ Container::Container(Container &C)
 {
     L = C.L;
     B = C.B;
+    H = C.H;
+
+    vol = L * 1l * B * 1l * H;
+
+    pos = C.pos;
+
+    packedI = vector<Item>();
+    for(Item& i : C.packedI) {
+        packedI.push_back(Item(i));
+    }
+
     cudaMalloc((void **)&h_grid, L * B * sizeof(int));
     cudaMemcpy(h_grid, C.h_grid, L * B * sizeof(int), cudaMemcpyDeviceToDevice);
 
@@ -243,78 +284,49 @@ void print_2D(T *res, int l, int b)
     f.close();
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    int l, b;
-    printf("Enter L, B: ");
-    scanf("%d %d", &l, &b);
+    int L, B, H, n;
+    fstream f;
+    f.open(argv[1], ios::in);
+    f >> L >> B >> H >> n;
 
-    setup(l, b);
+    printf("%d %d %d %d\n", L, B, H, n);
 
-    Container C(l, b);
+    int id, dst;
+    float wt;
+    int l, b, h;
+    vector<int> ornt(3);
+    vector<float> stld(3);
 
-    dim3 threadsPerBlock(32, 32);
-    dim3 numBlocks(1 + l / threadsPerBlock.x, 1 + b / threadsPerBlock.y);
+    vector<Item> I;
+    for (int i = 0; i < n; i++)
+    {
+        f >> id >> dst >> wt;
+        f >> l >> b >> h;
+        f >> ornt[0] >> ornt[1] >> ornt[2];
+        f >> stld[0] >> stld[1] >> stld[2];
+        I.push_back(Item(id, dst, wt, l, b, h, ornt, stld));
+    }
+    f.close();
 
-    int h, xl, xu, yl, yu;
-    printf("Enter h, xl, xu, yl, yu: ");
-    scanf("%d %d %d %d %d", &h, &xl, &xu, &yl, &yu);
-    cudaDeviceSynchronize();
-    add_int_to_mat<<<numBlocks, threadsPerBlock>>>(C.h_grid, h, b, xl, xu, yl, yu);
-    cudaDeviceSynchronize();
+    setup(L, B);
+    Container C(L, B, H);
 
-    cudaMemcpy(res, C.h_grid, l * b * sizeof(int), cudaMemcpyDeviceToHost);
+    std::sort(I.begin(), I.end());
 
-    print_2D<int>(res, l, b);
 
-    float vl, stress;
-    printf("Enter vl, stress: ");
-    scanf("%f %f", &vl, &stress);
-    update_lim<<<numBlocks, threadsPerBlock>>>(C.ld_lim, vl, stress, b, xl, xu, yl, yu);
-    cudaMemcpy(res_f, C.ld_lim, l * b * sizeof(float), cudaMemcpyDeviceToHost);
+    float iVol = 0;
+    for(Item & i : I) {
+        // printf("%d ", i.id);
+        iVol += i.vol;
+    }
+    // printf("\n");
 
-    print_2D<float>(res_f, l, b);
+    float cVol = C.vol;
+    printf("%f\n", iVol/cVol);
 
-    Container C1(C);
-
-    printf("Enter h, xl, xu, yl, yu: ");
-    scanf("%d %d %d %d %d", &h, &xl, &xu, &yl, &yu);
-    cudaDeviceSynchronize();
-    add_int_to_mat<<<numBlocks, threadsPerBlock>>>(C1.h_grid, h, b, xl, xu, yl, yu);
-
-    cudaMemcpy(res, C1.h_grid, l * b * sizeof(int), cudaMemcpyDeviceToHost);
-
-    print_2D<int>(res, l, b);
-
-    printf("Enter vl, stress: ");
-    scanf("%f %f", &vl, &stress);
-    update_lim<<<numBlocks, threadsPerBlock>>>(C1.ld_lim, vl, stress, b, xl, xu, yl, yu);
-    cudaMemcpy(res_f, C1.ld_lim, l * b * sizeof(float), cudaMemcpyDeviceToHost);
-
-    print_2D<float>(res_f, l, b);
-
-    int val;
-    printf("Enter val xl, xu, yl, yu: ");
-    scanf("%d %d %d %d %d", &val, &xl, &xu, &yl, &yu);
-    cudaMemcpy(eq, cpu_h_grid, l * b * sizeof(int), cudaMemcpyHostToDevice);
-    make_check_eq<<<numBlocks, threadsPerBlock>>>(eq, C1.h_grid, val, b, xl, xu, yl, yu);
-    cudaMemcpy(res, eq, l * b * sizeof(int), cudaMemcpyDeviceToHost);
-    print_2D<int>(res, l, b);
-
-    thrust::device_ptr<int> dev_ptr(eq);
-    int total = thrust::reduce(thrust::device, dev_ptr, dev_ptr + (l * b), 0);
-    printf("%d %d", total, (xu - xl) * (yu - yl));
-
-    float load;
-    printf("Enter load, xl, xu, yl, yu: ");
-    scanf("%f %d %d %d %d", &load, &xl, &xu, &yl, &yu);
-    cudaMemcpy(eq, cpu_h_grid, l * b * sizeof(int), cudaMemcpyHostToDevice);
-    make_check_les<<<numBlocks, threadsPerBlock>>>(eq, C1.ld_lim, load, b, xl, xu, yl, yu);
-    cudaMemcpy(res, eq, l * b * sizeof(int), cudaMemcpyDeviceToHost);
-    print_2D<int>(res, l, b);
-
-    total = thrust::reduce(thrust::device, dev_ptr, dev_ptr + (l * b), 0);
-    printf("%d %d", total, (xu - xl) * (yu - yl));
+    
 
     deAlloc();
 
