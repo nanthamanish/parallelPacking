@@ -13,11 +13,11 @@ file to test CUDA Kernel
 
 using namespace std;
 
-int *cpu_h_grid, *res, *eq, *les;
-float *cpu_ld_lim, *res_f;
+int *init_zer, *res, *eq, *les;
+float *init_inf, *res_f;
 const float MAX_LD = 100;
 
-__global__ void add_int_to_mat(int *G, int h, int b, int xl, int xu, int yl, int yu)
+__global__ void addToGridInt(int *G, int h, int b, int xl, int xu, int yl, int yu)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -28,7 +28,7 @@ __global__ void add_int_to_mat(int *G, int h, int b, int xl, int xu, int yl, int
     }
 }
 
-__global__ void add_float_to_mat(float *G, float ld, int b, int xl, int xu, int yl, int yu)
+__global__ void addToGridFloat(float *G, float ld, int b, int xl, int xu, int yl, int yu)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -39,7 +39,7 @@ __global__ void add_float_to_mat(float *G, float ld, int b, int xl, int xu, int 
     }
 }
 
-__global__ void update_lim(float *G, float v_load, float stress, int b, int xl, int xu, int yl, int yu)
+__global__ void updLoadLim(float *G, float v_load, float stress, int b, int xl, int xu, int yl, int yu)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -52,7 +52,7 @@ __global__ void update_lim(float *G, float v_load, float stress, int b, int xl, 
     }
 }
 
-__global__ void make_check_eq(int *eq, int *G, int val, int b, int xl, int xu, int yl, int yu)
+__global__ void checkEq(int *eq, int *G, int val, int b, int xl, int xu, int yl, int yu)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -66,7 +66,7 @@ __global__ void make_check_eq(int *eq, int *G, int val, int b, int xl, int xu, i
     }
 }
 
-__global__ void make_check_les(int *eq, float *G, float val, int b, int xl, int xu, int yl, int yu)
+__global__ void checkLeq(int *eq, float *G, float val, int b, int xl, int xu, int yl, int yu)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -103,10 +103,10 @@ Container::Container(int l, int b)
     B = b;
 
     cudaMalloc((void **)&h_grid, L * B * sizeof(int));
-    cudaMemcpy(h_grid, cpu_h_grid, L * B * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(h_grid, init_zer, L * B * sizeof(int), cudaMemcpyHostToDevice);
 
     cudaMalloc((void **)&ld_lim, L * B * sizeof(float));
-    cudaMemcpy(ld_lim, cpu_ld_lim, L * B * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(ld_lim, init_inf, L * B * sizeof(float), cudaMemcpyHostToDevice);
 }
 
 Container::Container(Container &C)
@@ -133,8 +133,8 @@ void setup(int l, int b)
     f << "";
     f.close();
 
-    cpu_h_grid = (int *)malloc(l * b * sizeof(int));
-    cpu_ld_lim = (float *)malloc(l * b * sizeof(float));
+    init_zer = (int *)malloc(l * b * sizeof(int));
+    init_inf = (float *)malloc(l * b * sizeof(float));
     res = (int *)malloc(l * b * sizeof(int));
     res_f = (float *)malloc(l * b * sizeof(float));
 
@@ -145,8 +145,8 @@ void setup(int l, int b)
     {
         for (int j = 0; j < b; j++)
         {
-            cpu_h_grid[i * b + j] = 0;
-            cpu_ld_lim[i * b + j] = MAX_LD;
+            init_zer[i * b + j] = 0;
+            init_inf[i * b + j] = MAX_LD;
         }
     }
 
@@ -160,12 +160,12 @@ void deAlloc()
 
     free(res_f);
     free(res);
-    free(cpu_ld_lim);
-    free(cpu_h_grid);
+    free(init_inf);
+    free(init_zer);
 }
 
-template <typename T>
-void print_2D(T *res, int l, int b)
+template <typename Option>
+void print2D(Option *res, int l, int b)
 {
     fstream f;
     f.open("res1.txt", ios::app);
@@ -198,46 +198,46 @@ int main()
     printf("Enter h, xl, xu, yl, yu: ");
     scanf("%d %d %d %d %d", &h, &xl, &xu, &yl, &yu);
     cudaDeviceSynchronize();
-    add_int_to_mat<<<numBlocks, threadsPerBlock>>>(C.h_grid, h, b, xl, xu, yl, yu);
+    addToGridInt<<<numBlocks, threadsPerBlock>>>(C.h_grid, h, b, xl, xu, yl, yu);
     cudaDeviceSynchronize();
 
     cudaMemcpy(res, C.h_grid, l * b * sizeof(int), cudaMemcpyDeviceToHost);
 
-    print_2D<int>(res, l, b);
+    print2D<int>(res, l, b);
 
     float vl, stress;
     printf("Enter vl, stress: ");
     scanf("%f %f", &vl, &stress);
-    update_lim<<<numBlocks, threadsPerBlock>>>(C.ld_lim, vl, stress, b, xl, xu, yl, yu);
+    updLoadLim<<<numBlocks, threadsPerBlock>>>(C.ld_lim, vl, stress, b, xl, xu, yl, yu);
     cudaMemcpy(res_f, C.ld_lim, l * b * sizeof(float), cudaMemcpyDeviceToHost);
 
-    print_2D<float>(res_f, l, b);
+    print2D<float>(res_f, l, b);
 
     Container C1(C);
 
     printf("Enter h, xl, xu, yl, yu: ");
     scanf("%d %d %d %d %d", &h, &xl, &xu, &yl, &yu);
     cudaDeviceSynchronize();
-    add_int_to_mat<<<numBlocks, threadsPerBlock>>>(C1.h_grid, h, b, xl, xu, yl, yu);
+    addToGridInt<<<numBlocks, threadsPerBlock>>>(C1.h_grid, h, b, xl, xu, yl, yu);
 
     cudaMemcpy(res, C1.h_grid, l * b * sizeof(int), cudaMemcpyDeviceToHost);
 
-    print_2D<int>(res, l, b);
+    print2D<int>(res, l, b);
 
     printf("Enter vl, stress: ");
     scanf("%f %f", &vl, &stress);
-    update_lim<<<numBlocks, threadsPerBlock>>>(C1.ld_lim, vl, stress, b, xl, xu, yl, yu);
+    updLoadLim<<<numBlocks, threadsPerBlock>>>(C1.ld_lim, vl, stress, b, xl, xu, yl, yu);
     cudaMemcpy(res_f, C1.ld_lim, l * b * sizeof(float), cudaMemcpyDeviceToHost);
 
-    print_2D<float>(res_f, l, b);
+    print2D<float>(res_f, l, b);
 
     int val;
     printf("Enter val xl, xu, yl, yu: ");
     scanf("%d %d %d %d %d", &val, &xl, &xu, &yl, &yu);
-    cudaMemcpy(eq, cpu_h_grid, l * b * sizeof(int), cudaMemcpyHostToDevice);
-    make_check_eq<<<numBlocks, threadsPerBlock>>>(eq, C1.h_grid, val, b, xl, xu, yl, yu);
+    cudaMemcpy(eq, init_zer, l * b * sizeof(int), cudaMemcpyHostToDevice);
+    checkEq<<<numBlocks, threadsPerBlock>>>(eq, C1.h_grid, val, b, xl, xu, yl, yu);
     cudaMemcpy(res, eq, l * b * sizeof(int), cudaMemcpyDeviceToHost);
-    print_2D<int>(res, l, b);
+    print2D<int>(res, l, b);
 
     thrust::device_ptr<int> dev_ptr(eq);
     int total = thrust::reduce(thrust::device, dev_ptr, dev_ptr + (l * b), 0);
@@ -246,10 +246,10 @@ int main()
     float load;
     printf("Enter load, xl, xu, yl, yu: ");
     scanf("%f %d %d %d %d", &load, &xl, &xu, &yl, &yu);
-    cudaMemcpy(eq, cpu_h_grid, l * b * sizeof(int), cudaMemcpyHostToDevice);
-    make_check_les<<<numBlocks, threadsPerBlock>>>(eq, C1.ld_lim, load, b, xl, xu, yl, yu);
+    cudaMemcpy(eq, init_zer, l * b * sizeof(int), cudaMemcpyHostToDevice);
+    checkLeq<<<numBlocks, threadsPerBlock>>>(eq, C1.ld_lim, load, b, xl, xu, yl, yu);
     cudaMemcpy(res, eq, l * b * sizeof(int), cudaMemcpyDeviceToHost);
-    print_2D<int>(res, l, b);
+    print2D<int>(res, l, b);
 
     total = thrust::reduce(thrust::device, dev_ptr, dev_ptr + (l * b), 0);
     printf("%d %d", total, (xu - xl) * (yu - yl));
