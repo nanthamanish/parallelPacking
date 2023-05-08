@@ -5,14 +5,21 @@ Packing File
 */
 
 #include <stdio.h>
+
 #include <iostream>
+
 #include <fstream>
+
 #include <algorithm>
+
 #include <set>
+
 #include <vector>
 
 #include <thrust/reduce.h>
+
 #include <thrust/device_ptr.h>
+
 #include <thrust/execution_policy.h>
 
 using namespace std;
@@ -23,14 +30,11 @@ int* init_zer, * res, * eq, * les;
 float* init_inf, * res_f;
 const float MAX_LD = 1;
 
-
-template <typename T>
+template < typename T >
 void print2D(T* res, int l, int b) {
     fstream f("res.txt", ios::out);
-    for (int i = 0; i < l; i++)
-    {
-        for (int j = 0; j < b; j++)
-        {
+    for (int i = 0; i < l; i++) {
+        for (int j = 0; j < b; j++) {
             f << res[i * b + j] << "\t";
         }
         f << "\n";
@@ -38,79 +42,64 @@ void print2D(T* res, int l, int b) {
     f << "\n";
 }
 
-__global__ void addToGridInt(int* G, int val, int b, int xl, int xu, int yl, int yu)
-{
+__global__ void addToGridInt(int* G, int val, int b, int xl, int xu, int yl, int yu) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (xl <= i && i < xu && yl <= j && j < yu)
-    {
+    if (xl <= i && i < xu && yl <= j && j < yu) {
         G[i * b + j] += val;
     }
 }
 
-__global__ void updLoadLim(float* G, float ld_lim, float load, int b, int xl, int xu, int yl, int yu)
-{
+__global__ void updLoadLim(float* G, float ld_lim, float load, int b, int xl, int xu, int yl, int yu) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (xl <= i && i < xu && yl <= j && j < yu)
-    {
+    if (xl <= i && i < xu && yl <= j && j < yu) {
         G[i * b + j] -= load;
         if (ld_lim < G[i * b + j])
             G[i * b + j] = ld_lim;
     }
 }
 
-__global__ void checkEq(int* eq, int* G, int val, int b, int xl, int xu, int yl, int yu)
-{
+__global__ void checkEq(int* eq, int* G, int val, int b, int xl, int xu, int yl, int yu) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (xl <= i && i < xu && yl <= j && j < yu)
-    {
-        if (G[i * b + j] == val)
-        {
+    if (xl <= i && i < xu && yl <= j && j < yu) {
+        if (G[i * b + j] == val) {
             eq[i * b + j] = 1;
         }
     }
 }
 
-__global__ void checkLeq(int* eq, float* G, float val, int b, int xl, int xu, int yl, int yu)
-{
+__global__ void checkLeq(int* eq, float* G, float val, int b, int xl, int xu, int yl, int yu) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (xl <= i && i < xu && yl <= j && j < yu)
-    {
-        if (val <= G[i * b + j])
-        {
+    if (xl <= i && i < xu && yl <= j && j < yu) {
+        if (val <= G[i * b + j]) {
             eq[i * b + j] = 1;
         }
     }
 }
 
-struct Location
-{
+struct Location {
     int x, y, z;
-    Location()
-    {
+    Location() {
         x = -1, y = -1, z = -1;
     }
 
-    Location(int X, int Y, int Z)
-    {
+    Location(int X, int Y, int Z) {
         x = X, y = Y, z = Z;
     }
 
-    Location(Location& L)
-    {
+    Location(Location& L) {
         x = L.x, y = L.y, z = L.z;
     }
 };
 
-struct Item
-{
+struct Item {
     int id, dst;
     float wt;
     int l, b, h;
@@ -119,8 +108,8 @@ struct Item
 
     int valid;
 
-    vector<int> orientation;
-    vector<float> stackload;
+    vector < int > orientation;
+    vector < float > stackload;
 
     int max_dim;
     float v_ld_lim;
@@ -128,18 +117,15 @@ struct Item
     Location pos;
 
     Item();
-    Item(int, int, float, int, int, int, vector<int>, vector<float>);
+    Item(int, int, float, int, int, int, vector < int >, vector < float >);
     Item(Item& I);
 
-    bool operator<(const Item& I) const
-    {
-        if (dst != I.dst)
-        {
+    bool operator < (const Item& I) const {
+        if (dst != I.dst) {
             return dst < I.dst;
         }
         float m1 = 0, m2 = 0;
-        for (int i = 0; i < 3; i++)
-        {
+        for (int i = 0; i < 3; i++) {
             m1 = max(m1, (float)orientation[i] * stackload[i]);
             m2 = max(m2, (float)I.orientation[i] * I.stackload[i]);
         }
@@ -149,14 +135,12 @@ struct Item
         return id < I.id;
     }
 
-    float stress_load()
-    {
+    float stress_load() {
         float base_area = l1 * b1;
         return wt / base_area;
     }
 
-    void setPackDim(int lo, int bo, int ho)
-    {
+    void setPackDim(int lo, int bo, int ho) {
         l1 = lo;
         b1 = bo;
         h1 = ho;
@@ -171,8 +155,7 @@ struct Item
     }
 };
 
-Item::Item()
-{
+Item::Item() {
     id = 0, dst = 0, wt = 0;
     l = 0, b = 0, h = 0;
     l1 = 0, b1 = 0, h1 = 0;
@@ -184,18 +167,21 @@ Item::Item()
     pos = Location();
 }
 
-Item::Item(int Id, int Dst, float Wt, int L, int B, int H, vector<int> ornt, vector<float> stld)
-{
+Item::Item(int Id, int Dst, float Wt, int L, int B, int H, vector < int > ornt, vector < float > stld) {
     id = Id, dst = Dst, wt = Wt;
     l = L, b = B, h = H;
     l1 = l, b1 = b, h1 = h;
 
-    vol = l * 1L * b * 1L * h;
+    vol = l * 1.0 * b * 1.0 * h;
 
     stackload = stld;
     orientation = ornt;
 
-    max_dim = max({ l, b, h });
+    max_dim = max({
+        l,
+        b,
+        h
+        });
     v_ld_lim = stackload[2];
 
     packed = 0;
@@ -203,13 +189,12 @@ Item::Item(int Id, int Dst, float Wt, int L, int B, int H, vector<int> ornt, vec
     pos = Location();
 }
 
-Item::Item(Item& I)
-{
+Item::Item(Item& I) {
     id = I.id, dst = I.dst, wt = I.wt;
     l = I.l, b = I.b, h = I.h;
     l1 = I.l1, b1 = I.b1, h1 = I.h1;
 
-    vol = l * 1L * b * 1L * h;
+    vol = l * 1.0 * b * 1.0 * h;
 
     stackload = I.stackload;
     orientation = I.orientation;
@@ -221,8 +206,7 @@ Item::Item(Item& I)
     pos = Location(I.pos);
 }
 
-struct Container
-{
+struct Container {
     int L;
     int B;
     int H;
@@ -232,8 +216,8 @@ struct Container
     int* h_grid;
     float* ld_lim;
 
-    std::set<std::pair<int, int>> corners;
-    std::vector<Item> packedI;
+    std::set < std::pair < int, int >> corners;
+    std::vector < Item > packedI;
 
     Container();
     Container(int, int, int);
@@ -262,16 +246,18 @@ Container::Container() {
     vol = 0, util_vol = 0;
 }
 
-Container::Container(int l, int b, int h)
-{
+Container::Container(int l, int b, int h) {
     L = l;
     B = b;
     H = h;
 
-    vol = L * 1l * B * 1l * H;
+    vol = L * 1.0 * B * 1.0 * H;
     util_vol = 0;
 
-    corners.insert({ 0, 0 });
+    corners.insert({
+        0,
+        0
+        });
 
     cudaMalloc((void**)&h_grid, L * B * sizeof(int));
     cudaMemcpy(h_grid, init_zer, L * B * sizeof(int), cudaMemcpyHostToDevice);
@@ -280,20 +266,18 @@ Container::Container(int l, int b, int h)
     cudaMemcpy(ld_lim, init_inf, L * B * sizeof(float), cudaMemcpyHostToDevice);
 }
 
-Container::Container(Container& C)
-{
+Container::Container(Container& C) {
     L = C.L;
     B = C.B;
     H = C.H;
 
-    vol = L * 1l * B * 1l * H;
+    vol = L * 1.0 * B * 1.0 * H;
     util_vol = C.util_vol;
 
     corners = C.corners;
 
-    packedI = vector<Item>();
-    for (Item& i : C.packedI)
-    {
+    packedI = vector < Item >();
+    for (Item& i : C.packedI) {
         packedI.push_back(Item(i));
     }
 
@@ -304,14 +288,12 @@ Container::Container(Container& C)
     cudaMemcpy(ld_lim, C.ld_lim, L * B * sizeof(float), cudaMemcpyDeviceToDevice);
 }
 
-Container::~Container()
-{
+Container::~Container() {
     cudaFree(h_grid);
     cudaFree(ld_lim);
 }
 
-Location Container::fit(int l, int b, int h, float load)
-{
+Location Container::fit(int l, int b, int h, float load) {
     if (DEBUG) {
         cout << "Inside Fit\n";
     }
@@ -320,8 +302,7 @@ Location Container::fit(int l, int b, int h, float load)
     dim3 threadsPerBlock(32, 32);
     dim3 numBlocks(1 + l / threadsPerBlock.x, 1 + b / threadsPerBlock.y);
 
-    for (auto p : corners)
-    {
+    for (auto p : corners) {
         if (DEBUG) {
             cout << p.first << " " << p.second << '\n';
         }
@@ -331,8 +312,7 @@ Location Container::fit(int l, int b, int h, float load)
         cudaMemcpy(res, h_grid, L * B * sizeof(int), cudaMemcpyDeviceToHost);
         int base = res[x * B + y];
 
-        if (x + l > L || y + b > B || base + h > H)
-        {
+        if (x + l > L || y + b > B || base + h > H) {
             pos_valid = 0;
             continue;
         }
@@ -350,8 +330,8 @@ Location Container::fit(int l, int b, int h, float load)
 
         cudaMemcpy(eq, init_zer, L * B * sizeof(int), cudaMemcpyHostToDevice);
         cudaDeviceSynchronize();
-        checkEq << <numBlocks, threadsPerBlock >> > (eq, h_grid, base, b, xl, xu, yl, yu);
-        thrust::device_ptr<int> dev_ptr(eq);
+        checkEq << < numBlocks, threadsPerBlock >> > (eq, h_grid, base, b, xl, xu, yl, yu);
+        thrust::device_ptr < int > dev_ptr(eq);
         total = thrust::reduce(thrust::device, dev_ptr, dev_ptr + (L * B), 0);
         if (DEBUG) {
             cout << "H tot:" << total << '\n';
@@ -360,16 +340,15 @@ Location Container::fit(int l, int b, int h, float load)
             char tmp;
             cin >> tmp;
         }
-        if (total != area)
-        {
+        if (total != area) {
             pos_valid = 0;
             continue;
         }
 
         cudaMemcpy(les, init_zer, L * B * sizeof(int), cudaMemcpyHostToDevice);
         cudaDeviceSynchronize();
-        checkLeq << <numBlocks, threadsPerBlock >> > (les, ld_lim, load, b, xl, xu, yl, yu);
-        thrust::device_ptr<int> dev_ptr2(les);
+        checkLeq << < numBlocks, threadsPerBlock >> > (les, ld_lim, load, b, xl, xu, yl, yu);
+        thrust::device_ptr < int > dev_ptr2(les);
         total = thrust::reduce(thrust::device, dev_ptr2, dev_ptr2 + (L * B), 0);
         if (DEBUG) {
             cout << "L tot:" << total << '\n';
@@ -378,14 +357,12 @@ Location Container::fit(int l, int b, int h, float load)
             char tmp;
             cin >> tmp;
         }
-        if (total != area)
-        {
+        if (total != area) {
             pos_valid = 0;
             continue;
         }
 
-        if (pos_valid)
-        {
+        if (pos_valid) {
             loc = Location(x, y, base);
         }
     }
@@ -402,8 +379,7 @@ struct State {
     Container C;
     float g;
 
-    bool operator < (const State& t) const
-    {
+    bool operator < (const State& t) const {
         if (g != t.g) {
             return g < t.g;
         }
@@ -425,8 +401,7 @@ struct State {
     }
 };
 
-void setup(int L, int B)
-{
+void setup(int L, int B) {
 
     init_zer = (int*)malloc(L * B * sizeof(int));
     init_inf = (float*)malloc(L * B * sizeof(float));
@@ -436,10 +411,8 @@ void setup(int L, int B)
     cudaMalloc((void**)&eq, L * B * sizeof(int));
     cudaMalloc((void**)&les, L * B * sizeof(int));
 
-    for (int i = 0; i < L; i++)
-    {
-        for (int j = 0; j < B; j++)
-        {
+    for (int i = 0; i < L; i++) {
+        for (int j = 0; j < B; j++) {
             init_zer[i * B + j] = 0;
             init_inf[i * B + j] = MAX_LD;
         }
@@ -447,17 +420,12 @@ void setup(int L, int B)
 
     if (DEBUG) {
         cout << "set up done\n";
-
-        // print2D(init_zer, L, B);
-        // print2D(init_inf, L, B);
-        // print2D(res, L, B);
     }
 
     return;
 }
 
-void deAlloc()
-{
+void deAlloc() {
     cudaFree(les);
     cudaFree(eq);
 
@@ -467,15 +435,13 @@ void deAlloc()
     free(init_zer);
 }
 
-vector<Item> allowedOrientations(Item& I)
-{
+vector < Item > allowedOrientations(Item& I) {
     if (DEBUG) {
         cout << "Inside Allowed Orientations\n";
         I.printObj();
     }
-    vector<Item> res(6);
-    if (I.orientation[1] == 1)
-    {
+    vector < Item > res(6);
+    if (I.orientation[1] == 1) {
         res[0] = Item(I);
         res[0].setPackDim(I.h, I.b, I.l);
         res[0].v_ld_lim = I.stackload[0];
@@ -484,14 +450,12 @@ vector<Item> allowedOrientations(Item& I)
         res[1].setPackDim(I.b, I.h, I.l);
         res[1].v_ld_lim = I.stackload[0];
     }
-    else
-    {
+    else {
         res[0].valid = 0;
         res[1].valid = 0;
     }
 
-    if (I.orientation[1] == 1)
-    {
+    if (I.orientation[1] == 1) {
         res[2] = Item(I);
         res[2].setPackDim(I.l, I.h, I.b);
         res[2].v_ld_lim = I.stackload[1];
@@ -500,14 +464,12 @@ vector<Item> allowedOrientations(Item& I)
         res[3].setPackDim(I.h, I.l, I.b);
         res[3].v_ld_lim = I.stackload[1];
     }
-    else
-    {
+    else {
         res[2].valid = 0;
         res[3].valid = 0;
     }
 
-    if (I.orientation[2] == 1)
-    {
+    if (I.orientation[2] == 1) {
         res[4] = Item(I);
         res[4].setPackDim(I.l, I.b, I.h);
         res[4].v_ld_lim = I.stackload[2];
@@ -516,8 +478,7 @@ vector<Item> allowedOrientations(Item& I)
         res[5].setPackDim(I.b, I.l, I.h);
         res[5].v_ld_lim = I.stackload[2];
     }
-    else
-    {
+    else {
         res[4].valid = 0;
         res[5].valid = 0;
     }
@@ -525,13 +486,11 @@ vector<Item> allowedOrientations(Item& I)
     return res;
 }
 
-void packItem(Container& C, Item& I)
-{
+void packItem(Container& C, Item& I) {
     if (DEBUG) {
         cout << "Inside Pack Item\n";
     }
-    if (I.pos.x == -1)
-    {
+    if (I.pos.x == -1) {
         return;
     }
     dim3 threadsPerBlock(32, 32);
@@ -541,7 +500,7 @@ void packItem(Container& C, Item& I)
     int xl = I.pos.x, xu = I.pos.x + I.l1;
     int yl = I.pos.y, yu = I.pos.y + I.b1;
     cudaDeviceSynchronize();
-    addToGridInt << <numBlocks, threadsPerBlock >> > (C.h_grid, I.h, C.B, xl, xu, yl, yu);
+    addToGridInt << < numBlocks, threadsPerBlock >> > (C.h_grid, I.h, C.B, xl, xu, yl, yu);
     if (DEBUG) {
         cudaMemcpy(res, C.h_grid, C.L * C.B * sizeof(int), cudaMemcpyDeviceToHost);
         print2D(res, C.L, C.B);
@@ -552,7 +511,7 @@ void packItem(Container& C, Item& I)
     float load = I.stress_load();
     float ld_lim = I.v_ld_lim;
     cudaDeviceSynchronize();
-    updLoadLim << <numBlocks, threadsPerBlock >> > (C.ld_lim, ld_lim, load, C.B, xl, xu, yl, yu);
+    updLoadLim << < numBlocks, threadsPerBlock >> > (C.ld_lim, ld_lim, load, C.B, xl, xu, yl, yu);
     if (DEBUG) {
         cout << ld_lim << ' ' << load << '\n';
         cudaMemcpy(res_f, C.ld_lim, C.L * C.B * sizeof(int), cudaMemcpyDeviceToHost);
@@ -561,17 +520,23 @@ void packItem(Container& C, Item& I)
         cin >> tmp;
     }
 
-    if (I.pos.x + I.l1 < C.L)
-    {
-        C.corners.insert({ I.pos.x + I.l1, I.pos.y });
+    if (I.pos.x + I.l1 < C.L) {
+        C.corners.insert({
+            I.pos.x + I.l1,
+            I.pos.y
+            });
     }
-    if (I.pos.y + I.b1 < C.B)
-    {
-        C.corners.insert({ I.pos.y, I.pos.y + I.b1 });
+    if (I.pos.y + I.b1 < C.B) {
+        C.corners.insert({
+            I.pos.y,
+            I.pos.y + I.b1
+            });
     }
-    if (I.pos.z + I.h1 < C.H)
-    {
-        C.corners.insert({ I.pos.x, I.pos.y });
+    if (I.pos.z + I.h1 < C.H) {
+        C.corners.insert({
+            I.pos.x,
+            I.pos.y
+            });
     }
 
     I.packed = 1;
@@ -581,33 +546,28 @@ void packItem(Container& C, Item& I)
     return;
 }
 
-float greedyPack(Container C, vector<Item>& items, int start)
-{
+float greedyPack(Container C, vector < Item >& items, int start) {
     if (DEBUG) {
         cout << "Inside Greedy\n";
     }
-    for (int i = start; i >= 0; i--)
-    {
+    for (int i = start; i >= 0; i--) {
         if (DEBUG) {
             cout << i << '\n';
 
         }
         Item I = items[i];
-        vector<Item> Iarr = allowedOrientations(I);
+        vector < Item > Iarr = allowedOrientations(I);
 
-        for (int j = 0; j < 6; j++)
-        {
+        for (int j = 0; j < 6; j++) {
             if (DEBUG) {
                 cout << j << '\n';
             }
-            if (Iarr[j].valid == 0)
-            {
+            if (Iarr[j].valid == 0) {
                 continue;
             }
             Iarr[j].pos = C.fit(Iarr[j].l1, Iarr[j].b1, Iarr[j].h1, Iarr[j].stress_load());
 
-            if (Iarr[j].pos.x != -1)
-            {
+            if (Iarr[j].pos.x != -1) {
                 packItem(C, Iarr[j]);
                 break;
             }
@@ -620,7 +580,7 @@ float greedyPack(Container C, vector<Item>& items, int start)
     return C.volUtil();
 }
 
-bool greater_pair(std::pair<float, Container>& a, std::pair<float, Container>& b) {
+bool greater_pair(std::pair < float, Container >& a, std::pair < float, Container >& b) {
     if (a.first > b.first) {
         return true;
     }
@@ -632,9 +592,7 @@ bool greater_pair(std::pair<float, Container>& a, std::pair<float, Container>& b
     }
 }
 
-
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
     // Reading Inputs
     int L, B, H, n;
     fstream f;
@@ -646,12 +604,11 @@ int main(int argc, char* argv[])
     int id, dst;
     float wt;
     int l, b, h;
-    vector<int> ornt(3);
-    vector<float> stld(3);
+    vector < int > ornt(3);
+    vector < float > stld(3);
 
-    vector<Item> items;
-    for (int i = 0; i < n; i++)
-    {
+    vector < Item > items;
+    for (int i = 0; i < n; i++) {
         f >> id >> dst >> wt;
         f >> l >> b >> h;
         f >> ornt[0] >> ornt[1] >> ornt[2];
@@ -685,7 +642,7 @@ int main(int argc, char* argv[])
 
     printf("%f\n", iVol / C.vol);
 
-    vector<State> tree;
+    vector < State > tree;
 
     tree.push_back(State(greedyPack(C, items, n - 1), C));
     for (int i = n - 1; i >= 0; i--) {
@@ -697,7 +654,7 @@ int main(int argc, char* argv[])
             I.printObj();
         }
 
-        vector<Item> Iarr = allowedOrientations(I);
+        vector < Item > Iarr = allowedOrientations(I);
         for (int k = tree.size(); k >= 0; k--) {
             Container C1 = tree[k].C;
             tree.push_back(State(greedyPack(C1, items, i - 1), C1));
