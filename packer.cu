@@ -25,15 +25,24 @@ Packing File
 using namespace std;
 
 const int TREE_WIDTH = 5;
-bool DEBUG = true;
 int* init_zer, * res, * eq, * les;
 float* init_inf, * res_f;
 const float MAX_LD = 1;
 
+bool DEBUG = true, DEBUG_3D = false;
+
+char tmp;
+
 template < typename T >
 void print2D(T* res, int l, int b) {
     fstream f("res.txt", ios::out);
+    f << '\t';
+    for (int j = 0; j < b; j++) {
+        f << j << '\t';
+    }
+    f << '\n';
     for (int i = 0; i < l; i++) {
+        f << i << '\t';
         for (int j = 0; j < b; j++) {
             f << res[i * b + j] << "\t";
         }
@@ -151,7 +160,7 @@ struct Item {
         printf("%d %d %d\n", l, b, h);
         printf("%d %d %d\n", orientation[0], orientation[1], orientation[2]);
         printf("%.3f %.3f %.3f, v: %3f\n", stackload[0], stackload[1], stackload[2], v_ld_lim);
-        printf("\n");
+        //printf("\n");
     }
 };
 
@@ -294,16 +303,17 @@ Container::~Container() {
 }
 
 Location Container::fit(int l, int b, int h, float load) {
-    if (DEBUG) {
-        cout << "Inside Fit\n";
+    if (DEBUG_3D) {
+        cout << "Inside Fit: ";
+        // cout << l << ' ' << b << ' ' << h << ' ' << load << '\n';
     }
     Location loc;
 
     dim3 threadsPerBlock(32, 32);
-    dim3 numBlocks(1 + l / threadsPerBlock.x, 1 + b / threadsPerBlock.y);
+    dim3 numBlocks(1 + L / threadsPerBlock.x, 1 + B / threadsPerBlock.y);
 
     for (auto p : corners) {
-        if (DEBUG) {
+        if (DEBUG_3D) {
             cout << p.first << " " << p.second << '\n';
         }
 
@@ -322,22 +332,29 @@ Location Container::fit(int l, int b, int h, float load) {
         int area = (xu - xl) * (yu - yl);
         int total;
 
-        if (DEBUG) {
+        if (DEBUG_3D) {
             cout << xl << ' ' << xu << ' ';
             cout << yl << ' ' << yu << ' ';
             cout << area << '\n';
+            cout << "Base:" << base << '\n';
         }
 
         cudaMemcpy(eq, init_zer, L * B * sizeof(int), cudaMemcpyHostToDevice);
         cudaDeviceSynchronize();
-        checkEq << < numBlocks, threadsPerBlock >> > (eq, h_grid, base, b, xl, xu, yl, yu);
+        checkEq << < numBlocks, threadsPerBlock >> > (eq, h_grid, base, B, xl, xu, yl, yu);
         thrust::device_ptr < int > dev_ptr(eq);
         total = thrust::reduce(thrust::device, dev_ptr, dev_ptr + (L * B), 0);
-        if (DEBUG) {
+        if (DEBUG_3D) {
             cout << "H tot:" << total << '\n';
+
+            cudaMemcpy(res, eq, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+            print2D<int>(res, L, B);
+            cout << "Eq of H in file: ";
+            cin >> tmp;
+
             cudaMemcpy(res, h_grid, L * B * sizeof(int), cudaMemcpyDeviceToHost);
-            print2D(res, L, B);
-            char tmp;
+            print2D<int>(res, L, B);
+            cout << "H in file: ";
             cin >> tmp;
         }
         if (total != area) {
@@ -347,14 +364,20 @@ Location Container::fit(int l, int b, int h, float load) {
 
         cudaMemcpy(les, init_zer, L * B * sizeof(int), cudaMemcpyHostToDevice);
         cudaDeviceSynchronize();
-        checkLeq << < numBlocks, threadsPerBlock >> > (les, ld_lim, load, b, xl, xu, yl, yu);
+        checkLeq << < numBlocks, threadsPerBlock >> > (les, ld_lim, load, B, xl, xu, yl, yu);
         thrust::device_ptr < int > dev_ptr2(les);
         total = thrust::reduce(thrust::device, dev_ptr2, dev_ptr2 + (L * B), 0);
-        if (DEBUG) {
+        if (DEBUG_3D) {
             cout << "L tot:" << total << '\n';
+
+            cudaMemcpy(res, les, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+            print2D<int>(res, L, B);
+            cout << "Les of L in file: ";
+            cin >> tmp;
+
             cudaMemcpy(res_f, ld_lim, L * B * sizeof(int), cudaMemcpyDeviceToHost);
-            print2D(res_f, L, B);
-            char tmp;
+            print2D<float>(res_f, L, B);
+            cout << "L in file: ";
             cin >> tmp;
         }
         if (total != area) {
@@ -364,13 +387,14 @@ Location Container::fit(int l, int b, int h, float load) {
 
         if (pos_valid) {
             loc = Location(x, y, base);
+            break;
         }
     }
 
-    if (DEBUG) {
-        cout << loc.x << ' ' << loc.y << ' ' << loc.z << '\n';
-        char tmp;
+    if (DEBUG_3D) {
+        cout << loc.x << ' ' << loc.y << ' ' << loc.z << ": ";
         cin >> tmp;
+        cout << '\n';
     }
     return loc;
 }
@@ -399,6 +423,12 @@ struct State {
         C = O.C;
         g = O.g;
     }
+
+    void printObj() {
+        cout << "g: " << g << '\n';
+        cout << "C: ";
+        C.printObj();
+    }
 };
 
 void setup(int L, int B) {
@@ -419,7 +449,7 @@ void setup(int L, int B) {
     }
 
     if (DEBUG) {
-        cout << "set up done\n";
+        cout << "set up done\n\n";
     }
 
     return;
@@ -436,10 +466,10 @@ void deAlloc() {
 }
 
 vector < Item > allowedOrientations(Item& I) {
-    if (DEBUG) {
-        cout << "Inside Allowed Orientations\n";
-        I.printObj();
-    }
+    // if (DEBUG) {
+    //     cout << "\tInside Allowed Orientations\n";
+    //     I.printObj();
+    // }
     vector < Item > res(6);
     if (I.orientation[1] == 1) {
         res[0] = Item(I);
@@ -483,12 +513,16 @@ vector < Item > allowedOrientations(Item& I) {
         res[5].valid = 0;
     }
 
+    // if (DEBUG) {
+    //     cout << "\tExiting Allowed Orientations\n";
+    // }
+
     return res;
 }
 
 void packItem(Container& C, Item& I) {
     if (DEBUG) {
-        cout << "Inside Pack Item\n";
+        // cout << "Inside Pack Item\n";
     }
     if (I.pos.x == -1) {
         return;
@@ -499,26 +533,30 @@ void packItem(Container& C, Item& I) {
     // updating h_grid;
     int xl = I.pos.x, xu = I.pos.x + I.l1;
     int yl = I.pos.y, yu = I.pos.y + I.b1;
-    cudaDeviceSynchronize();
-    addToGridInt << < numBlocks, threadsPerBlock >> > (C.h_grid, I.h, C.B, xl, xu, yl, yu);
     if (DEBUG) {
-        cudaMemcpy(res, C.h_grid, C.L * C.B * sizeof(int), cudaMemcpyDeviceToHost);
-        print2D(res, C.L, C.B);
-        char tmp;
-        cin >> tmp;
+        // cout << xl << ' ' << xu << ' ' << yl << ' ' << yu << '\n';
     }
+    cudaDeviceSynchronize();
+    addToGridInt << < numBlocks, threadsPerBlock >> > (C.h_grid, I.h1, C.B, xl, xu, yl, yu);
+    // if (DEBUG) {
+    //     cout << I.h1 << '\n';
+    //     cudaMemcpy(res, C.h_grid, C.L * C.B * sizeof(int), cudaMemcpyDeviceToHost);
+    //     print2D<int>(res, C.L, C.B);
+    //     cout << "H in file: ";
+    //     cin >> tmp;
+    // }
     // updating ld_lim;
     float load = I.stress_load();
     float ld_lim = I.v_ld_lim;
     cudaDeviceSynchronize();
     updLoadLim << < numBlocks, threadsPerBlock >> > (C.ld_lim, ld_lim, load, C.B, xl, xu, yl, yu);
-    if (DEBUG) {
-        cout << ld_lim << ' ' << load << '\n';
-        cudaMemcpy(res_f, C.ld_lim, C.L * C.B * sizeof(int), cudaMemcpyDeviceToHost);
-        print2D(res_f, C.L, C.B);
-        char tmp;
-        cin >> tmp;
-    }
+    // if (DEBUG) {
+    //     cout << ld_lim << ' ' << load << '\n';
+    //     cudaMemcpy(res_f, C.ld_lim, C.L * C.B * sizeof(int), cudaMemcpyDeviceToHost);
+    //     print2D<float>(res_f, C.L, C.B);
+    //     cout << "L in file: ";
+    //     cin >> tmp;
+    // }
 
     if (I.pos.x + I.l1 < C.L) {
         C.corners.insert({
@@ -543,24 +581,27 @@ void packItem(Container& C, Item& I) {
     C.packedI.push_back(Item(I));
     C.util_vol += I.vol;
 
+    if (DEBUG) {
+        // cout << "Exiting Pack Item\n\n";
+    }
+
     return;
 }
 
 float greedyPack(Container C, vector < Item >& items, int start) {
     if (DEBUG) {
-        cout << "Inside Greedy\n";
+        // cout << "Inside Greedy\n";
     }
     for (int i = start; i >= 0; i--) {
         if (DEBUG) {
-            cout << i << '\n';
-
+            // cout << i << '\n';
         }
         Item I = items[i];
         vector < Item > Iarr = allowedOrientations(I);
 
         for (int j = 0; j < 6; j++) {
             if (DEBUG) {
-                cout << j << '\n';
+                // cout << j << '\n';
             }
             if (Iarr[j].valid == 0) {
                 continue;
@@ -575,7 +616,11 @@ float greedyPack(Container C, vector < Item >& items, int start) {
     }
 
     if (DEBUG) {
-        cout << C.volUtil() << "\n";
+        cout << C.volUtil() << "\n\n";
+    }
+
+    if (DEBUG) {
+        // cout << "Exiting Greedy\n\n";
     }
     return C.volUtil();
 }
@@ -615,7 +660,7 @@ int main(int argc, char* argv[]) {
         f >> stld[0] >> stld[1] >> stld[2];
         items.push_back(Item(id, dst, wt, l, b, h, ornt, stld));
         if (DEBUG) {
-            cout << items[i].id << ' ' << items[i].v_ld_lim << '\n';
+            // cout << items[i].id << ' ' << items[i].v_ld_lim << '\n';
         }
     }
     f.close();
@@ -640,34 +685,120 @@ int main(int argc, char* argv[]) {
         iVol += i.vol;
     }
 
-    printf("%f\n", iVol / C.vol);
+    printf("%f\n\n", iVol / C.vol);
 
     vector < State > tree;
 
-    tree.push_back(State(greedyPack(C, items, n - 1), C));
+    float g = greedyPack(C, items, n - 1);
+    State S(g, C);
+    if (DEBUG) {
+        //S.printObj();
+    }
+    tree.push_back(State(S));
+    if (DEBUG) {
+        cout << "Tree len: " << tree.size() << '\n';
+        // tree[0].printObj();
+    }
+
     for (int i = n - 1; i >= 0; i--) {
         if (DEBUG) {
             cout << i << '\n';
         }
         Item I = items[i];
         if (DEBUG) {
-            I.printObj();
+            //I.printObj();
         }
 
         vector < Item > Iarr = allowedOrientations(I);
-        for (int k = tree.size(); k >= 0; k--) {
-            Container C1 = tree[k].C;
+
+        for (int k = tree.size() - 1; k >= 0; k--) {
+            Container C_state(tree[k].C);
+
+            if (DEBUG) {
+                // cout << k << '\n';
+                // tree[k].printObj();
+            }
+            cout << "Empty\n"; 
+            Container C1(C_state);
+            cout << C1.volUtil() << '\n';
             tree.push_back(State(greedyPack(C1, items, i - 1), C1));
 
             for (int j = 0; j < 6; j++) {
                 if (Iarr[j].valid == 0) {
                     continue;
                 }
+                if (DEBUG) {
+                    cout << j << '\n';
+                }
 
-                Container C_new = tree[k].C;
+                Container C_new(C_state);
+                cout << C_new.volUtil() << '\n';
+
+                if (DEBUG) {
+                    cout << "Tree Size: " << tree.size() << " k: " << k << '\n';
+                    cudaMemcpy(res, tree[k].C.h_grid, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+                    print2D<int>(res, L, B);
+                    cout << "Pre fit tree[k].C H in file: ";
+                    cin >> tmp;
+
+                    cudaMemcpy(res_f, tree[k].C.ld_lim, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+                    print2D<float>(res_f, L, B);
+                    cout << "Pre fit tree[k].C L in file: ";
+                    cin >> tmp;
+
+                    cudaMemcpy(res, C_new.h_grid, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+                    print2D<int>(res, L, B);
+                    cout << "Pre fit C_new H in file: ";
+                    cin >> tmp;
+
+                    cudaMemcpy(res_f, C_new.ld_lim, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+                    print2D<float>(res_f, L, B);
+                    cout << "Pre fit C_new L in file: ";
+                    cin >> tmp;
+                }
+
+                DEBUG_3D = true;
                 Iarr[j].pos = C_new.fit(Iarr[j].l1, Iarr[j].b1, Iarr[j].h1, Iarr[j].stress_load());
+                DEBUG_3D = false;
+
                 if (Iarr[j].pos.x != -1) {
-                    packItem(C, Iarr[j]);
+                    if (DEBUG) {
+                        for (auto t : tree) {
+                            cout << t.C.volUtil() << ' ';
+                        }
+                        cout << '\n';
+                        
+                        cout << "Tree Size: " << tree.size() << " k: " << k << '\n';
+                        cudaMemcpy(res, tree[k].C.h_grid, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+                        print2D<int>(res, L, B);
+                        cout << "Pre Pack tree[k].C H in file: ";
+                        cin >> tmp;
+
+                        cudaMemcpy(res_f, tree[k].C.ld_lim, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+                        print2D<float>(res_f, L, B);
+                        cout << "Pre Pack tree[k].C L in file: ";
+                        cin >> tmp;
+                    }
+                    packItem(C_new, Iarr[j]);
+
+                    if (DEBUG) {
+                        for (auto t : tree) {
+                            cout << t.C.volUtil() << ' ';
+                        }
+                        cout << '\n';
+
+                        cout << "Tree Size: " << tree.size() << " k: " << k << '\n';
+                        cudaMemcpy(res, tree[k].C.h_grid, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+                        print2D<int>(res, L, B);
+                        cout << "Post Pack tree[k].C H in file: ";
+                        cin >> tmp;
+
+                        cudaMemcpy(res_f, tree[k].C.ld_lim, L * B * sizeof(int), cudaMemcpyDeviceToHost);
+                        print2D<float>(res_f, L, B);
+                        cout << "Post Pack tree[k].C L in file: ";
+                        cin >> tmp;
+                    }
+
                     tree.push_back(State(greedyPack(C_new, items, i - 1), C_new));
                 }
             }
@@ -689,6 +820,17 @@ int main(int argc, char* argv[]) {
         if (tree.size() > TREE_WIDTH) {
             tree.resize(TREE_WIDTH);
         }
+
+        cout << "After Resizing:\n";
+        cout << n - i << ": ";
+        for (State s : tree) {
+            string st = to_string(s.g);
+            if (st.size() < 5) {
+                st += "0";
+            }
+            cout << st << " ";
+        }
+        cout << "\n\n";
     }
 
     Container resC = tree[0].C;
