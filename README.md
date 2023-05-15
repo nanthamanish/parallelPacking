@@ -12,6 +12,6 @@ Data Source: [OR Library](http://people.brunel.ac.uk/~mastjjb/jeb/orlib/conloadi
 #### Status:
 + CUDA Kernel Testing - Done
 + Development - Done
-+ Debugging - Underway
++ Debugging - Underway - Greedy giving wrong VU
 + Testing - To Do
 + Build C++ Code and Compare - To Do
